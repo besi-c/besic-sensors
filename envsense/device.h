@@ -4,6 +4,7 @@
 //   Penn Bauman <pcb8gb@virginia.edu>
 #ifndef DEVICE_H
 #define DEVICE_H
+#define BESIC_TMP_DYNAMOFILE "var/besic/sensorPipe"
 
 #include <stdio.h>
 #include <stdlib.h>

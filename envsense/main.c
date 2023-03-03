@@ -7,6 +7,9 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <besic.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <fcntl.h>
 
 #include "device.h"
 
@@ -14,8 +17,11 @@
 pthread_mutex_t read_lock;
 pthread_cond_t read_cv, send_cv;
 char *DATA_FILE;
+char *PIPE_FILE;
 char print = 0;
+char *myPipe = BESIC_TMP_DYNAMOFILE;
 
+//
 
 // Print data to console
 void printData(besic_data const *d) {
@@ -32,13 +38,31 @@ void writeData(besic_data const *d, char const *filename) {
 		exit(1);
 	}
 	FILE *fp;
-	fp = fopen(filename, "a");
+	fp = fopen(filename,"a");
 	if(fp == NULL) {
 		perror("File Write Error");
 		exit(1);
 	}
 	fprintf(fp, "%lld,%f,%f,%f,%f\n", d->timestamp, d->lux, d->tmp, d->prs, d->hum);
 	fclose(fp);
+}
+
+// Write data to pipe for python program reading
+void writePipe(besic_data *sensorData, char const *pipeFile){
+	if(sensorData == NULL){
+		perror("No sensor data to write to pipe");
+		exit(1);
+	}
+	FILE *fd;
+	fd = fopen(pipeFile,"a");
+	if(fd == NULL){
+		perror("Error writing to pipe");
+		exit(1);
+	}
+	//printData(sensorData);
+	fprintf(fd, "%lld,%f,%f,%f,%f\n", sensorData->timestamp, sensorData->lux, sensorData->tmp, sensorData->prs, sensorData->hum);
+	fclose(fd);
+
 }
 
 
@@ -53,11 +77,15 @@ void *readings_run(void *args) {
 		pthread_cond_broadcast(&send_cv);
 		pthread_mutex_unlock(&read_lock);
 
-		if (!print)
+		if (!print){
 			writeData(reading, DATA_FILE);
-
+			//Also send reading to dynamo, if unsuccessful track line number, set flag, on next inter read from that line to eof for dynamo 
+			// since its a temp file wipe on shutdown?
+			writePipe(reading,myPipe);
+		}
 		// Wait for new cycle
 		pthread_mutex_lock(&read_lock);
+		//get PID, while the PID is waiting, read and send?
 		pthread_cond_wait(&read_cv, &read_lock);
 		pthread_mutex_unlock(&read_lock);
 	}
@@ -79,6 +107,8 @@ void *sending_run(void *args) {
 			pthread_mutex_unlock(&read_lock);
 		} else {
 			// Send data heartbeat
+			//send to dynamo as well
+
 			besic_data temp_reading;
 			memcpy(&temp_reading, reading, sizeof(besic_data));
 			pthread_mutex_unlock(&read_lock);
@@ -95,6 +125,21 @@ void *sending_run(void *args) {
 
 
 int main(int argc, char **argv) {
+
+	//Create pipe in temp directory for files
+	//int pipeDesc;
+	if(access(myPipe, F_OK)==0){
+	}
+	else{
+		mkfifo(myPipe, 0666);
+	}
+	//Implement write end in C, read end in Python
+
+	//Have read try until acquired?
+	//Have python try until read acquired
+	//Have python close before send attempt, if send attempt failed, MQTT handles?
+	//char writeArray[sizeof(besic_data)];
+	//char readArray[sizeof(besic_data)];
 	// Print simple test reading
 	if ((argc > 1) && (0 == strcmp("test", argv[1]))) {
 		besic_data reading;
